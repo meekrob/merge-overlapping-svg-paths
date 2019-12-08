@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 import sys
-from sympy import *
-from sympy.geometry import *
+
+from shapely.geometry import Point
+from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon
+from shapely.ops import cascaded_union
 
 filename=sys.argv[1]
 
 import xml.etree.ElementTree as ET
-#tree = ET.parse('11_TGATAAs.svg')
 tree = ET.parse(filename)
 root = tree.getroot()
 qname=ET.QName('{http://www.w3.org/2000/svg}')
 NS='{http://www.w3.org/2000/svg}'
 #NS = ''
+
+def svg_rect_to_shapely_polygon(svg_rect):
+    return Polygon( svg_rect_to_coords(svg_rect) )
+
 
 def traverse( element, parent, callback, data={}):
     if 'path' not in data: data['path'] = element.tag.replace(NS,'')
@@ -21,6 +27,62 @@ def traverse( element, parent, callback, data={}):
     callback(element, parent, data)
     for child in element:
         traverse( child, element, callback, data.copy() )
+
+def reorder_by_pairs( list_of_pairs ):
+    X = list_of_pairs[0]
+    Y = list_of_pairs[1]
+    pairs = []
+    for x,y in zip(X,Y):
+        pairs.append( (x,y) )
+
+    return pairs
+    
+
+def rectify_to_shapely(rects, parent):
+    polys_by_class = {}
+    for rect in rects:
+        if 'class' in rect.attrib:
+            rect_class = rect.attrib['class']
+        else: 
+            rect_class = ''
+
+        if rect_class not in polys_by_class: 
+            polys_by_class[ rect_class ] = Polygon()
+
+        new_poly = svg_rect_to_shapely_polygon( rect )
+
+        if isinstance(polys_by_class[ css_class ], type(MultiPolygon())):
+            polylist = [ p for p in polys_by_class[ css_class ] ] # turn into a list of polygons
+        else:
+            polylist = [polys_by_class[ css_class ]]
+
+        overlapped = False
+        for poly_i in range( len(polylist) ):
+            if poly.overlaps( new_poly ):
+                polylist[ poly_i ] = cascaded_union( [ polylist[ poly_i ], new_poly ] )  # should never produce a MultiPolygon
+                overlapped = True
+                break
+
+        if not overlapped:
+            polylist.append( new_poly )
+                
+        polys_by_class[ rect_class ] = polylist
+
+        # all rects are converted to polygons, so delete each one
+        parent.remove(rect)
+
+    for css_class in polys_by_class:
+
+        if isinstance(polys_by_class[ css_class ], type(MultiPolygon())):
+            polylist = polys_by_class[ css_class ]
+        else:
+            polylist = [ polys_by_class[ css_class ] ]
+            
+        for polygon in polylist:
+            simplified = polygon.simplify(.05)
+            pathstring = list_to_svg_path_d( reorder_by_pairs(simplified.exterior.xy) )
+            ET.SubElement( parent, NS + 'path', {'class': css_class, 'd': pathstring } )
+            
 
 def rectify(rects, parent):
     class_count = {}
@@ -42,7 +104,7 @@ def rectify(rects, parent):
 
         # adding deletion function inside merge
         polygon = merge_rect_list( rect_elements, parent )
-        pathstring = list_to_svg_path_d( polygon )
+        pathstring = list_to_svg_path_d( reorder_by_pairs(polygon) )
         try:
             ET.SubElement( parent, NS + 'path', {'class': rect_class, 'd': pathstring } )
         except:
@@ -74,7 +136,7 @@ def list_to_svg_path_d(l):
     return d + 'z'
 
 def svg_rect_to_coords( rect ):
-    precision = 4
+    precision = 8
     try:
         x = round(float( rect.attrib['x'] ), precision)
         y = round( float( rect.attrib['y'] ), precision)
@@ -138,7 +200,8 @@ def examine_rect(element, parent, data):
         nrects = len(rects)
         if nrects > 1:
             data['nrects'] = nrects
-            rectify(rects,element)
+            #rectify(rects,element)
+            rectify_to_shapely(rects,element)
     
 #for i,child in enumerate(root):
 #   print('type(root)', type(root), file=sys.stderr)
@@ -147,4 +210,8 @@ def examine_rect(element, parent, data):
 for i,group in enumerate(root.iter(NS + 'g')):
     traverse( group, root, examine_rect, {'path': 'svg'})
 
-tree.write('processed.svg')
+# unbelievable
+import xml.dom.minidom as md
+mdxml = md.parseString(ET.tostring(root))
+outf = open('process.svg', 'w')
+outf.write(mdxml.toprettyxml())

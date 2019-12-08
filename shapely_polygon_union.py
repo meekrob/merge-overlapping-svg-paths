@@ -4,6 +4,7 @@ import shapely
 
 from shapely.geometry import Point
 from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon
 from shapely.ops import cascaded_union
 
 if False:
@@ -27,6 +28,12 @@ print(union)
 p1 = Polygon( [ (0.1,0.5), (0.1,1.5), (1.1,1.5), (1.1,0.5) ] )
 p2  = Polygon( [ (1.1,0.5), (1.1,1.5), (2.1,1.5), (2.1,0.5) ] )
 p3 = Polygon( [ (3.1,0.5), (3.1,1.5), (4.1,1.5), (4.1,0.5) ] )
+
+if isinstance(p1, type(MultiPolygon())):
+    for p in p1:
+        print(p)
+else:
+    print("not a multi")
 
 union2 = cascaded_union([union,p1,p2,p3])
 
